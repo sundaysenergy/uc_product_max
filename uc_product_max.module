@@ -1,0 +1,157 @@
+<?php
+// $Id$
+
+/**
+ * @file
+ * This module adds a textfield to product forms for you to enter a minimum
+ * quantity of the product that must be in the cart for it to be checked out.
+ *
+ * The product minimum checkout pane must be the lowest weighted cart pane in
+ * order for the logic to properly intercept any invalid carts.
+ *
+ * Coded by Ryan of Ubercart.org.
+ *
+ * Development sponsored by Plum Drama - http://www.plumdrama.com
+ */
+
+
+/*******************************************************************************
+ * Hook Functions (Drupal)
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_nodeapi().
+ */
+function uc_product_max_nodeapi(&$node, $op, $arg3 = null, $arg4 = null) {
+  switch($op) {
+    case 'delete':
+      db_query("DELETE FROM {uc_product_max} WHERE nid = %d", $node->nid);
+      break;
+
+    case 'load':
+      $result = db_query("SELECT * FROM {uc_product_max} WHERE nid = %d", $node->nid);
+      if ($row = db_fetch_object($result)) {
+        return array('product_max' => $row->product_max); 
+      }
+      break;
+
+    case 'insert':
+    case 'update':
+      $node->product_max = intval($node->product_max);
+      if ($node->product_max <= 0) {
+        db_query("DELETE FROM {uc_product_max} WHERE nid = %d", $node->nid);
+      }
+      else {
+        db_query("UPDATE {uc_product_max} SET product_max = %d WHERE nid = %d", $node->product_max, $node->nid);
+        if (db_affected_rows() == 0) {
+          db_query("INSERT INTO {uc_product_max} VALUES (%d, %d)", $node->nid, $node->product_max);
+        }
+      }
+      break;
+
+    case 'view':
+      if ($node->product_max > 1) {
+        drupal_add_css(drupal_get_path('module', 'uc_product_max') .'/uc_product_max.css');
+
+        $node->content['product_max'] = array(
+          '#value' => theme('uc_product_max', $node->product_max, $node->pmin_multiple),
+          '#weight' => 2,
+        );
+      }
+      break;
+  }
+}
+
+/**
+ * Implementation of hook_form_alter().
+ */
+function uc_product_max_form_alter(&$form, &$form_state, $form_id) {
+  $node = $form['#node'];
+  $product_types = uc_product_node_info();
+  if ($form_id == $node->type .'_node_form' && isset($product_types[$node->type])){
+    $form['product_max_fieldset'] = array(
+      '#type' => 'fieldset',
+      '#title' => t('Product maximum'),
+      '#collapsed' => FALSE,
+    );
+    $form['product_max_fieldset']['product_max'] = array(
+      '#type' => 'textfield',
+      '#title' => t('Maximum quantity allowed to checkout'),
+      '#description' => t('Enter the maximum quantity of this product allowed to checkout.'),
+      '#default_value' => $node->product_max,
+    );
+  }
+  else if ($form['#base'] == 'uc_product_add_to_cart_form' && is_object($form['#parameters'][1])) {
+    $node = $form['#parameters'][1];
+    if ($node->product_max == 1 && isset($form['qty'])) {
+      $form['qty']['#type'] = 'hidden';
+      $form['qty']['#value'] = 1;
+    }
+  }
+}
+
+
+/*******************************************************************************
+ * Hook Functions (Ubercart)
+ ******************************************************************************/
+
+/**
+ * Implementation of hook_checkout_pane().
+ */
+function uc_product_max_checkout_pane() {
+  $panes[] = array(
+    'id' => 'product_max',
+    'callback' => 'uc_checkout_pane_product_max',
+    'title' => t('Product maximums'),
+    'desc' => t('Checks a cart to make sure it meets the product maximum requirements.'),
+    'weight' => -10,
+  );
+
+  return $panes;
+}
+
+
+/*******************************************************************************
+ * Callback Functions, Forms, and Tables
+ ******************************************************************************/
+
+// Checks the cart at checkout to make sure it's valid.
+function uc_checkout_pane_product_max($op) {
+  switch ($op) {
+    case 'view':
+      $items = uc_cart_get_contents();
+      $pass = TRUE;
+
+      $buying = array();
+      $titles = array();
+      foreach ($items as $item) {
+        $buying[$item->nid] += $item->qty;
+        $titles[$item->nid] = $item->title;
+      }
+      if (empty($buying)) { return; }
+
+      $result = db_query("SELECT * FROM {uc_product_max} WHERE nid IN (%s)", implode(',', array_keys($buying)));
+      while ($row = db_fetch_object($result)) {
+        $max[$row->nid] = $row->product_max;
+      }
+
+      foreach ($buying as $nid => $qty) {
+		if (!empty($max[$nid]) && $qty > $max[$nid]) {
+		  drupal_set_message(t('You have indicated a quantity that qualifies for discounted pricing, please email <a href="mailto:info@perfectmeasuringtape.com">info@perfectmeasuringtape.com</a> or call 1-800-631-1052 (419-243-6811) for quantity pricing', array('!qty' => $max[$nid], '!item' => $titles[$nid])), 'error');
+		  $pass = FALSE;
+		}
+      }
+
+      if (!$pass) {
+        drupal_set_message(t('Please update your cart contents and try again.'), 'error');
+        drupal_goto('cart');
+      }
+  }
+}
+
+// Themes the product minimum notice line on product view pages.
+function theme_uc_product_max($max, $multiple) {
+  $output = t('If your shopping cart contains more than !qty orders of this product, you will not be able to checkout.', array('!qty' => $max));
+
+  return '<div class="uc_product_max">'. $output .'</div>';
+}

@@ -1,0 +1,19 @@
+<?php
+// $Id$
+
+function uc_product_max_install() {
+  switch ($GLOBALS['db_type']) {
+    case 'mysql':
+    case 'mysqli':
+      db_query("CREATE TABLE {uc_product_max} (
+        nid INT(10) NOT NULL,
+        product_max MEDIUMINT NOT NULL,
+        PRIMARY KEY (nid)
+      ) /*!40100 DEFAULT CHARACTER SET UTF8 */ ");
+      break;
+  }
+}
+
+function uc_product_max_uninstall() {
+  db_query("DROP TABLE IF EXISTS {uc_product_max}");
+}

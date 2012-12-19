@@ -1,0 +1,5 @@
+name = Product Maximum
+description = Set a maximum quantity for products in a cart necessary for checkout.
+package = Ubercart - extra
+core = 6.x
+
